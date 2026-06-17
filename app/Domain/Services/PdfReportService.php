@@ -20,12 +20,12 @@ class PdfReportService
         $this->mermaid = $mermaid ?? new MermaidGenerationService();
     }
 
-    public function generateReport(RelationSchema $schema, array $diagnosis, array $decomposition = []): string
+    public function generateReport(RelationSchema $schema, array $diagnosis, array $decomposition = [], string $dialect = 'postgresql'): string
     {
-        return $this->generateHtmlReport($schema, $diagnosis, $decomposition);
+        return $this->generateHtmlReport($schema, $diagnosis, $decomposition, $dialect);
     }
 
-    public function generateHtmlReport(RelationSchema $schema, array $diagnosis, array $decomposition = []): string
+    public function generateHtmlReport(RelationSchema $schema, array $diagnosis, array $decomposition = [], string $dialect = 'postgresql'): string
     {
         $candidateKeys = $this->engine->findCandidateKeys($schema);
         $attributes = $schema->getAttributesSet();
@@ -33,12 +33,13 @@ class PdfReportService
         $currentNf = $diagnosis['current_nf'] ?? '1NF';
         $violations = $diagnosis['violations'] ?? [];
         $suggestions = $diagnosis['suggestions'] ?? [];
+        $engineLabel = strtoupper($decomposition['sql_engine'] ?? $dialect);
         $sql = '';
 
         if (!empty($decomposition)) {
             $sql = $decomposition['sql'] ?? '';
         } elseif (empty($decomposition)) {
-            $sql = $this->sqlService->generateCreateTable($schema);
+            $sql = $this->sqlService->generateCreateTable($schema, $dialect);
         }
 
         // Build attribute rows
@@ -126,6 +127,8 @@ class PdfReportService
 <div class="container">
   <h1>📊 Reporte de Normalización</h1>
   <p class="subtitle">DataQuest — Generado el " . date('Y-m-d H:i:s') . "</p>
+
+  <p class="subtitle">Motor SQL: {$engineLabel}</p>
 
   <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
     <span>Esquema: <strong>{$schema->name}</strong></span>

@@ -95,7 +95,7 @@ class AcademyController extends Controller
 
             $schema = new RelationSchema(
                 $request->table_name,
-                $request->attributes,
+                $request->input('attributes'),
                 $fds
             );
 
@@ -133,7 +133,7 @@ class AcademyController extends Controller
 
             $schema = new RelationSchema(
                 $request->table_name,
-                $request->attributes,
+                $request->input('attributes'),
                 $fds
             );
 

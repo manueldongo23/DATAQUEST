@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\DominioAprendizaje;
 use App\Services\NameValidationService;
+use App\Services\ActivityRecorder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -14,7 +15,8 @@ use Illuminate\Validation\ValidationException;
 class AuthController extends Controller
 {
     public function __construct(
-        private NameValidationService $nameValidationService
+        private NameValidationService $nameValidationService,
+        private ActivityRecorder $activityRecorder
     ) {}
 
     /**
@@ -179,6 +181,8 @@ class AuthController extends Controller
         }
 
         $user->save();
+
+        $this->activityRecorder->record($user->id, 'perfil', 'Perfil actualizado desde Ajustes.');
 
         return response()->json([
             'success' => true,

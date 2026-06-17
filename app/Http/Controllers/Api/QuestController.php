@@ -6,33 +6,35 @@ use App\Http\Controllers\Controller;
 use App\Models\Quest;
 use App\Models\QuestAttempt;
 use App\Services\AcademicProgressService;
+use App\Services\QuestGenerationService;
+use App\Services\ActivityRecorder;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class QuestController extends Controller
 {
     public function __construct(
-        private AcademicProgressService $progressService
+        private AcademicProgressService $progressService,
+        private QuestGenerationService $questGenerationService,
+        private ActivityRecorder $activityRecorder
     ) {}
 
-    public function index()
+    public function index(Request $request)
     {
-        $quests = Quest::active()
-            ->select('id', 'title', 'description', 'quest_type', 'difficulty', 'xp_reward', 'nf_requirement', 'is_active')
-            ->orderBy('difficulty')
-            ->orderBy('title')
-            ->paginate(20);
+        $user = $request->user();
+        $sessionSeed = $request->header('X-DataQuest-Session');
+        $limit = max(20, min(100, (int) $request->query('limit', 100)));
+        $quests = $this->questGenerationService->questsForUser($user, $sessionSeed, $limit);
 
         return response()->json([
             'success' => true,
-            'data' => $quests,
+            'data' => $quests->values(),
         ]);
     }
 
     public function show(int $id)
     {
-        $quest = Quest::active()->findOrFail($id);
+        $quest = Quest::generated()->active()->findOrFail($id);
 
         return response()->json([
             'success' => true,
@@ -51,7 +53,7 @@ class QuestController extends Controller
 
     public function start(int $id, Request $request)
     {
-        $quest = Quest::active()->findOrFail($id);
+        $quest = Quest::generated()->active()->findOrFail($id);
         $user = $request->user();
 
         $existing = QuestAttempt::where('quest_id', $quest->id)
@@ -73,6 +75,8 @@ class QuestController extends Controller
             'started_at' => now(),
         ]);
 
+        $this->activityRecorder->record($user->id, 'reto', sprintf('Inició el reto "%s".', $quest->title));
+
         return response()->json([
             'success' => true,
             'data' => $attempt,
@@ -82,7 +86,7 @@ class QuestController extends Controller
 
     public function submit(int $id, Request $request)
     {
-        $quest = Quest::active()->findOrFail($id);
+        $quest = Quest::generated()->active()->findOrFail($id);
         $user = $request->user();
 
         $attempt = QuestAttempt::where('quest_id', $quest->id)
@@ -142,6 +146,17 @@ class QuestController extends Controller
             $user->xp += $xpEarned;
             $user->save();
         }
+
+        $this->activityRecorder->record(
+            $user->id,
+            'reto',
+            sprintf(
+                '%s el reto "%s" con %d puntos.',
+                $status === 'completed' ? 'Completó' : 'Intentó',
+                $quest->title,
+                $score
+            )
+        );
 
         return response()->json([
             'success' => $status === 'completed',

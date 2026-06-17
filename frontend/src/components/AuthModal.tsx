@@ -85,7 +85,7 @@ export const AuthModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       );
       const data = response.data;
       if (data.success) {
-        setUser(data.user, data.access_token);
+        setUser(data.user, data.access_token || data.token);
         toast.success(`¡Bienvenido, ${data.user.apodo}!`);
         onClose();
       } else {

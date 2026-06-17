@@ -34,6 +34,15 @@ class SqlGenerationService
             'references' => 'REFERENCES',
             'drop_column' => 'DROP COLUMN',
         ],
+        'sqlserver' => [
+            'integer' => 'INT',
+            'text' => 'NVARCHAR(MAX)',
+            'bigint' => 'BIGINT',
+            'serial' => 'INT IDENTITY(1,1) PRIMARY KEY',
+            'primary_key' => 'PRIMARY KEY',
+            'references' => 'REFERENCES',
+            'drop_column' => 'DROP COLUMN',
+        ],
     ];
 
     public function generateCreateTable(RelationSchema $schema, string $dialect = 'postgresql'): string

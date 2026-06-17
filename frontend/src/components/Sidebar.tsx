@@ -1,5 +1,20 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, FlaskConical, Sword, Gamepad2, Trophy, LogOut, UserPlus, ChevronLeft, ChevronRight, GraduationCap, BookOpen, Box } from 'lucide-react';
+import {
+  LayoutDashboard,
+  FolderKanban,
+  DatabaseZap,
+  GraduationCap,
+  ShieldCheck,
+  Swords,
+  BookOpen,
+  BarChart3,
+  History,
+  Settings2,
+  LogOut,
+  UserPlus,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 import type { ViewType } from '../types';
 import { useAuthStore } from '../store/authStore';
 import { LocaleSwitcher } from './LocaleSwitcher';
@@ -10,15 +25,17 @@ interface SidebarProps {
   onOpenAuthModal: () => void;
 }
 
-const navItems: { id: ViewType; icon: React.ReactNode; label: string; requiresAuth?: boolean }[] = [
-  { id: 'dashboard',     icon: <LayoutDashboard className="w-5 h-5" />, label: 'Dashboard' },
-  { id: 'academy',       icon: <GraduationCap className="w-5 h-5" />,   label: 'Academia' },
-  { id: 'normalization', icon: <FlaskConical className="w-5 h-5" />,    label: 'Laboratorio' },
-  { id: 'dataquest',     icon: <Sword className="w-5 h-5" />,          label: 'DataQuest', requiresAuth: true },
-  { id: 'games',         icon: <Gamepad2 className="w-5 h-5" />,       label: 'Juegos' },
-  { id: 'leaderboard',   icon: <Trophy className="w-5 h-5" />,         label: 'Ranking', requiresAuth: true },
-  { id: 'glossary',     icon: <BookOpen className="w-5 h-5" />,        label: 'Glosario' },
-  { id: 'sandbox',      icon: <Box className="w-5 h-5" />,             label: 'Sandbox' },
+const navItems: { id: ViewType; icon: React.ReactNode; label: string; requiresAuth?: boolean; ariaLabel?: string }[] = [
+  { id: 'dashboard', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Inicio' },
+  { id: 'projects', icon: <FolderKanban className="w-5 h-5" />, label: 'Proyectos', requiresAuth: true },
+  { id: 'normalization', icon: <DatabaseZap className="w-5 h-5" />, label: 'Normalizer Engine', requiresAuth: true, ariaLabel: 'Normalización y laboratorio' },
+  { id: 'academy', icon: <GraduationCap className="w-5 h-5" />, label: 'Academy', requiresAuth: true },
+  { id: 'validator', icon: <ShieldCheck className="w-5 h-5" />, label: 'Validador', requiresAuth: true },
+  { id: 'dataquest', icon: <Swords className="w-5 h-5" />, label: 'Retos', requiresAuth: true, ariaLabel: 'Retos y DataQuest' },
+  { id: 'glossary', icon: <BookOpen className="w-5 h-5" />, label: 'Biblioteca' },
+  { id: 'reports', icon: <BarChart3 className="w-5 h-5" />, label: 'Reportes', requiresAuth: true },
+  { id: 'history', icon: <History className="w-5 h-5" />, label: 'Historial', requiresAuth: true },
+  { id: 'settings', icon: <Settings2 className="w-5 h-5" />, label: 'Ajustes', requiresAuth: true },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, onOpenAuthModal }) => {
@@ -70,26 +87,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, onOpe
       {/* Divider */}
       <div className="mx-4 mb-3 border-t border-slate-700/50" />
 
-      {/* Search — hidden when collapsed */}
-      {!collapsed && (
-        <div className="px-4 mb-4">
-          <div className="flex items-center gap-2 bg-slate-800/80 rounded-lg px-3 py-2">
-            <span className="text-slate-500 text-sm">🔍</span>
-            <input
-              type="text"
-              placeholder="Buscar..."
-              aria-label="Buscar en la navegación"
-              className="bg-transparent text-sm text-slate-300 placeholder-slate-600 outline-none w-full"
-            />
-          </div>
-        </div>
-      )}
-
       {/* Nav Items */}
       <nav className="flex-1 px-3 space-y-1 stagger" role="navigation" aria-label="Navegación principal">
         {!collapsed && (
           <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
-            Menú Principal
+            Panel Principal
           </p>
         )}
         {navItems.map((item) => {
@@ -100,6 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, onOpe
               onClick={() => handleNavClick(item.id)}
               disabled={isProtected}
               title={isProtected ? 'Solo para usuarios registrados' : item.label}
+              aria-label={item.ariaLabel || item.label}
               aria-current={currentView === item.id ? 'page' : undefined}
               className={`sidebar-link relative w-full text-left animate-slide-left transition-all ${
                 currentView === item.id ? 'active' : ''
@@ -177,7 +180,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, onOpe
         {isGuest && !collapsed && (
           <div className="mt-3 p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-center">
             <p className="text-xs text-cyan-300 font-medium mb-2">
-              📌 Modo Invitado: Acceso limitado
+              Modo Invitado: acceso limitado
             </p>
             <button
               className="text-xs text-indigo-300 hover:text-indigo-200 font-semibold flex items-center gap-1 mx-auto transition-colors"

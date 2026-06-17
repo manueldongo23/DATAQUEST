@@ -12,9 +12,9 @@ return [
     |
     */
 
-    'paths' => ['api/*'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
-    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
     'allowed_origins' => [
         env('FRONTEND_URL', 'http://localhost:5173'),
@@ -27,6 +27,7 @@ return [
         'X-Requested-With',
         'Authorization',
         'Accept',
+        'X-DataQuest-Session',
     ],
 
     'exposed_headers' => [],

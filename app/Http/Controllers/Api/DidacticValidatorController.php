@@ -30,7 +30,7 @@ class DidacticValidatorController extends Controller
 
             $schema = new RelationSchema(
                 $request->table_name,
-                $request->attributes,
+                $request->input('attributes'),
                 $fds
             );
 
@@ -58,7 +58,7 @@ class DidacticValidatorController extends Controller
         try {
             $schema = new RelationSchema(
                 $request->table_name,
-                $request->attributes,
+                $request->input('attributes'),
                 []
             );
 

@@ -71,8 +71,9 @@ class ExportController extends Controller
         try {
             $schema = $this->buildSchema($validated);
             $diagnosis = $this->engine->diagnoseNormalization($schema);
-            $decomposition = $this->decompositionService->decomposeTo3NF($schema);
-            $output = $this->pdf->generateHtmlReport($schema, $diagnosis, $decomposition);
+            $engine = $validated['engine'] ?? 'postgresql';
+            $decomposition = $this->decompositionService->decomposeTo3NF($schema, $engine);
+            $output = $this->pdf->generateHtmlReport($schema, $diagnosis, $decomposition, $engine);
 
             return response($output, 200, ['Content-Type' => 'text/html']);
         } catch (\Throwable $e) {
@@ -90,14 +91,16 @@ class ExportController extends Controller
         try {
             $schema = $this->buildSchema($validated);
             $diagnosis = $this->engine->diagnoseNormalization($schema);
-            $decomposition = $this->decompositionService->decomposeTo3NF($schema);
+            $engine = $validated['engine'] ?? 'postgresql';
+            $decomposition = $this->decompositionService->decomposeTo3NF($schema, $engine);
             $decomposedSchemas = $decomposition['resulting_tables'] ?? [];
 
             $bundle = [
                 'dbml' => $this->dbml->generate($schema, $diagnosis),
                 'mermaid' => $this->mermaid->generateErDiagram($schema, $decomposedSchemas),
-                'html' => $this->pdf->generateHtmlReport($schema, $diagnosis, $decomposition),
+                'html' => $this->pdf->generateHtmlReport($schema, $diagnosis, $decomposition, $engine),
                 'sql' => $decomposition['sql'] ?? '',
+                'sql_engine' => $engine,
                 'format' => 'all',
             ];
 
@@ -116,6 +119,7 @@ class ExportController extends Controller
             'table_name' => 'required|string|max:100',
             'attributes' => 'required|array|min:1|max:100',
             'dependencies' => 'required|array|max:200',
+            'engine' => 'nullable|string|in:postgresql,mysql,sqlite,sqlserver',
         ]);
     }
 

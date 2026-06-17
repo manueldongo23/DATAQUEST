@@ -4,14 +4,17 @@ namespace App\Http\Controllers\Api;
 use App\Domain\Services\NormalizationEngine;
 use App\Domain\Services\ClosureExplainerService;
 use App\Domain\Services\CsvImportService;
+use App\Domain\Services\SandboxService;
 use App\Domain\Services\SqlDdlParserService;
 use App\Domain\Entities\RelationSchema;
 use App\Domain\Entities\FunctionalDependency;
 use App\Application\UseCases\ValidateSchemaUseCase;
 use App\Domain\Services\GamificationService;
+use App\Services\ActivityRecorder;
 use App\Models\Esquema;
 use App\Models\Validacion;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\Controller;
 
 class NormalizationController extends Controller
@@ -22,15 +25,21 @@ class NormalizationController extends Controller
         private GamificationService $gamificationService,
         private ClosureExplainerService $closureExplainer,
         private CsvImportService $csvImportService,
-        private SqlDdlParserService $ddlParser
+        private SqlDdlParserService $ddlParser,
+        private SandboxService $sandboxService,
+        private ActivityRecorder $activityRecorder
     ) {}
 
     public function validateSchema(Request $request)
     {
         $validated = $request->validate([
             'table_name' => 'required|string|max:100',
+            'description' => 'nullable|string|max:500',
+            'schema_id' => 'nullable|integer|exists:esquemas,id',
             'attributes' => 'required|array|min:1|max:100',
-            'dependencies' => 'required|array|max:200'
+            'dependencies' => 'required|array|max:200',
+            'engine' => 'nullable|string|in:postgresql,mysql,sqlite,sqlserver',
+            'mode' => 'nullable|string|in:academico,profesional,estricto'
         ]);
 
         try {
@@ -48,40 +57,137 @@ class NormalizationController extends Controller
 
             // Ejecutar use case
             $result = $this->validateSchemaUseCase->execute($schema);
-            
+            $analysis = $this->sandboxService->analyze($validated);
+            $diagnosis = data_get($result, 'diagnosis', []);
+            $currentNf = data_get($diagnosis, 'current_nf', '1NF');
+            $violations = data_get($diagnosis, 'violations', []);
+            $engine = $validated['engine'] ?? 'postgresql';
+            $mode = $validated['mode'] ?? 'profesional';
+
+            $user = $request->user() ?? Auth::guard('sanctum')->user() ?? Auth::guard('web')->user();
             $gamificationData = null;
-            $user = null;
-            $user = $request->user();
+            $versionMeta = null;
+            $savedSchema = null;
 
             if ($user) {
-                // Persistencia analítica
-                $dbEsquema = Esquema::create([
-                    'user_id' => $user->id,
-                    'nombre' => $validated['table_name'],
-                    'estructura_json' => $validated['attributes'],
-                    'dependencias_json' => $validated['dependencies']
-                ]);
+                $schemaId = $validated['schema_id'] ?? null;
+                $previousSchema = null;
+
+                if ($schemaId) {
+                    $dbEsquema = Esquema::where('user_id', $user->id)->findOrFail($schemaId);
+                    $previousSchema = [
+                        'table_name' => $dbEsquema->nombre,
+                        'description' => $dbEsquema->descripcion,
+                        'attributes' => $dbEsquema->estructura_json ?? [],
+                        'dependencies' => $dbEsquema->dependencias_json ?? [],
+                    ];
+                    $dbEsquema->fill([
+                        'nombre' => $validated['table_name'],
+                        'descripcion' => $validated['description'] ?? $dbEsquema->descripcion,
+                        'estructura_json' => $validated['attributes'],
+                        'dependencias_json' => $validated['dependencies'],
+                    ]);
+                    $dbEsquema->save();
+                } else {
+                    // Persistencia analítica
+                    $dbEsquema = Esquema::create([
+                        'user_id' => $user->id,
+                        'nombre' => $validated['table_name'],
+                        'descripcion' => $validated['description'] ?? null,
+                        'estructura_json' => $validated['attributes'],
+                        'dependencias_json' => $validated['dependencies']
+                    ]);
+                }
+
+                $maxVersion = (int) Validacion::where('esquema_id', $dbEsquema->id)->max('version_number');
+                $totalVersions = (int) Validacion::where('esquema_id', $dbEsquema->id)->count();
+                $versionNumber = $maxVersion > 0 ? $maxVersion + 1 : $totalVersions + 1;
+                $versionLabel = 'v' . $versionNumber;
+                $estado = empty($violations) ? 'Completada' : 'En progreso';
+                $changes = $this->buildVersionChanges($previousSchema, $validated);
+                $snapshot = $this->buildVersionSnapshot(
+                    $dbEsquema,
+                    $validated,
+                    $analysis,
+                    $result,
+                    $versionNumber,
+                    $versionLabel,
+                    $estado,
+                    $currentNf,
+                    $engine,
+                    $mode,
+                    $changes
+                );
 
                 Validacion::create([
                     'esquema_id' => $dbEsquema->id,
-                    'nivel_normalizacion' => $result->currentNf,
-                    'violaciones_json' => $result->violations
+                    'version_number' => $versionNumber,
+                    'version_label' => $versionLabel,
+                    'estado' => $estado,
+                    'target_nf' => $currentNf,
+                    'engine' => $engine,
+                    'mode' => $mode,
+                    'nivel_normalizacion' => $currentNf,
+                    'violaciones_json' => $violations,
+                    'analysis_json' => $analysis,
+                    'decomposition_json' => $analysis['decomposition'] ?? null,
+                    'snapshot_json' => $snapshot,
+                    'changes_json' => $changes,
+                    'sql_generado' => $analysis['sql'] ?? null,
                 ]);
+
+                $savedSchema = [
+                    'id' => $dbEsquema->id,
+                    'nombre' => $dbEsquema->nombre,
+                    'descripcion' => $dbEsquema->descripcion,
+                    'estructura_json' => $dbEsquema->estructura_json,
+                    'dependencias_json' => $dbEsquema->dependencias_json,
+                ];
+                $versionMeta = [
+                    'id' => $versionNumber,
+                    'version_number' => $versionNumber,
+                    'version_label' => $versionLabel,
+                    'estado' => $estado,
+                    'target_nf' => $currentNf,
+                    'engine' => $engine,
+                    'mode' => $mode,
+                    'changes' => $changes,
+                    'snapshot' => $snapshot,
+                ];
 
                 // Gamificación: asignar xp si es una validación libre (puedes ajustar lógica si es por puzzle)
                 // Se determinan los conceptos afectados por la validación
                 $conceptosAfectados = [];
-                if ($result->currentNf === '1NF' || $result->currentNf === '1FN') $conceptosAfectados = ['1FN'];
-                if ($result->currentNf === '2NF' || $result->currentNf === '2FN') $conceptosAfectados = ['1FN', '2FN'];
-                if ($result->currentNf === '3NF' || $result->currentNf === '3FN') $conceptosAfectados = ['1FN', '2FN', '3FN'];
-                if ($result->currentNf === 'BCNF') $conceptosAfectados = ['1FN', '2FN', '3FN', 'BCNF'];
+                if ($currentNf === '1NF' || $currentNf === '1FN') $conceptosAfectados = ['1FN'];
+                if ($currentNf === '2NF' || $currentNf === '2FN') $conceptosAfectados = ['1FN', '2FN'];
+                if ($currentNf === '3NF' || $currentNf === '3FN') $conceptosAfectados = ['1FN', '2FN', '3FN'];
+                if ($currentNf === 'BCNF') $conceptosAfectados = ['1FN', '2FN', '3FN', 'BCNF'];
 
                 $gamificationData = $this->gamificationService->awardXP($user, 10, $conceptosAfectados);
+
+                $this->activityRecorder->record(
+                    $user->id,
+                    'validacion',
+                    sprintf('Validó %s y alcanzó %s en %s.', $dbEsquema->nombre, $currentNf, $versionLabel)
+                );
             }
             
+            $responseData = array_merge($result, [
+                'analysis' => $analysis,
+                'schema' => $savedSchema ?? [
+                    'id' => $validated['schema_id'] ?? null,
+                    'nombre' => $validated['table_name'],
+                    'descripcion' => $validated['description'] ?? null,
+                    'estructura_json' => $validated['attributes'],
+                    'dependencias_json' => $validated['dependencies'],
+                ],
+                'version' => $versionMeta,
+                'schema_id' => $savedSchema['id'] ?? ($validated['schema_id'] ?? null),
+            ]);
+
             return response()->json([
                 'success' => true,
-                'data' => $result,
+                'data' => $responseData,
                 'gamification' => $gamificationData
             ]);
         } catch (\Throwable $e) {
@@ -90,6 +196,95 @@ class NormalizationController extends Controller
                 'message' => 'Error al procesar el esquema. Verifica los datos ingresados.'
             ], 422);
         }
+    }
+
+    private function buildVersionChanges(?array $previousSchema, array $currentSchema): array
+    {
+        $currentAttributes = array_values(array_map('strval', $currentSchema['attributes'] ?? []));
+
+        if (!$previousSchema) {
+            return [
+                'is_initial_version' => true,
+                'table_name_changed' => false,
+                'description_changed' => false,
+                'attributes_added' => $currentAttributes,
+                'attributes_removed' => [],
+                'dependencies_added' => $this->dependencySignatures($currentSchema['dependencies'] ?? []),
+                'dependencies_removed' => [],
+            ];
+        }
+
+        $previousAttributes = array_values(array_map('strval', $previousSchema['attributes'] ?? []));
+        $previousDependencies = $this->dependencySignatures($previousSchema['dependencies'] ?? []);
+        $currentDependencies = $this->dependencySignatures($currentSchema['dependencies'] ?? []);
+
+        return [
+            'is_initial_version' => false,
+            'table_name_changed' => ($previousSchema['table_name'] ?? null) !== ($currentSchema['table_name'] ?? null),
+            'description_changed' => ($previousSchema['description'] ?? null) !== ($currentSchema['description'] ?? null),
+            'attributes_added' => array_values(array_diff($currentAttributes, $previousAttributes)),
+            'attributes_removed' => array_values(array_diff($previousAttributes, $currentAttributes)),
+            'dependencies_added' => array_values(array_diff($currentDependencies, $previousDependencies)),
+            'dependencies_removed' => array_values(array_diff($previousDependencies, $currentDependencies)),
+        ];
+    }
+
+    private function buildVersionSnapshot(
+        Esquema $schema,
+        array $validated,
+        array $analysis,
+        array $result,
+        int $versionNumber,
+        string $versionLabel,
+        string $estado,
+        string $currentNf,
+        string $engine,
+        string $mode,
+        array $changes
+    ): array {
+        return [
+            'schema' => [
+                'id' => $schema->id,
+                'table_name' => $schema->nombre,
+                'description' => $schema->descripcion,
+                'attributes' => array_values($validated['attributes'] ?? []),
+                'dependencies' => array_map(
+                    fn($dep) => [
+                        'determinant' => array_values($dep['determinant'] ?? []),
+                        'dependent' => array_values($dep['dependent'] ?? []),
+                    ],
+                    $validated['dependencies'] ?? []
+                ),
+            ],
+            'analysis' => $analysis,
+            'validation' => [
+                'schema_name' => $result['schema_name'] ?? $schema->nombre,
+                'candidate_keys' => $result['candidate_keys'] ?? [],
+                'current_nf' => $currentNf,
+                'diagnosis' => $result['diagnosis'] ?? [],
+                'message' => $result['message'] ?? null,
+                'is_fully_normalized' => $result['is_fully_normalized'] ?? false,
+            ],
+            'version' => [
+                'number' => $versionNumber,
+                'label' => $versionLabel,
+                'estado' => $estado,
+                'target_nf' => $currentNf,
+                'engine' => $engine,
+                'mode' => $mode,
+                'created_at' => now()->toIso8601String(),
+            ],
+            'changes' => $changes,
+        ];
+    }
+
+    private function dependencySignatures(array $dependencies): array
+    {
+        return array_map(function (array $dependency): string {
+            $determinant = implode(', ', $dependency['determinant'] ?? []);
+            $dependent = implode(', ', $dependency['dependent'] ?? []);
+            return $determinant . ' -> ' . $dependent;
+        }, $dependencies);
     }
 
     /**

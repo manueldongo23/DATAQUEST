@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\SchemaController;
+use App\Http\Controllers\Api\ActivityController;
 use App\Http\Controllers\Api\AcademyController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ExportController;
@@ -147,7 +148,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/schemas', [SchemaController::class, 'index']);
     Route::get('/schemas/{id}', [SchemaController::class, 'show']);
+    Route::post('/schemas/{id}/open', [SchemaController::class, 'open']);
+    Route::get('/schemas/{id}/versions', [SchemaController::class, 'versions']);
+    Route::post('/schemas/{id}/versions/{validationId}/restore', [SchemaController::class, 'restoreVersion']);
+    Route::patch('/schemas/{id}', [SchemaController::class, 'update']);
+    Route::patch('/schemas/{id}/archive', [SchemaController::class, 'archive']);
+    Route::patch('/schemas/{id}/restore', [SchemaController::class, 'restore']);
     Route::delete('/schemas/{id}', [SchemaController::class, 'destroy']);
+    Route::get('/activity', [ActivityController::class, 'index']);
 
     Route::get('/progress', [ProgressController::class, 'index']);
     Route::get('/progress/learning-path', [ProgressController::class, 'learningPath']);

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { FlaskConical, Code, Upload, BookOpen, Plus, Trash2 } from 'lucide-react';
+import { ArrowRight, BookOpen, Code, FlaskConical, Plus, Trash2, Upload } from 'lucide-react';
 import axiosInstance from '../services/api';
+import { useSchemaStore } from '../store/schemaStore';
+import type { RelationSchema, ViewType } from '../types';
 import { LoadingSpinner } from './LoadingSpinner';
 import { toast } from './Toast';
 import { DiagnosisPanel } from './DiagnosisPanel';
@@ -12,7 +14,19 @@ interface DependencyInput {
   dep: string[];
 }
 
-export const SandboxView: React.FC = () => {
+interface SandboxViewProps {
+  onNavigate?: (view: ViewType) => void;
+}
+
+function persistSchemaFromPayload(schema: RelationSchema, name?: string) {
+  return {
+    schema,
+    meta: { name: name ?? schema.table_name },
+  };
+}
+
+export const SandboxView: React.FC<SandboxViewProps> = ({ onNavigate }) => {
+  const { setCurrentSchema } = useSchemaStore();
   const [mode, setMode] = useState<SandboxMode>('manual');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -28,6 +42,11 @@ export const SandboxView: React.FC = () => {
   const [csv, setCsv] = useState('');
 
   const [exerciseNf, setExerciseNf] = useState('1FN');
+
+  const saveSchemaToStore = (schema: RelationSchema, name?: string) => {
+    const payload = persistSchemaFromPayload(schema, name);
+    setCurrentSchema(payload.schema, payload.meta);
+  };
 
   const handleAddAttribute = () => setAttributes([...attributes, '']);
   const handleRemoveAttribute = (i: number) => {
@@ -69,6 +88,16 @@ export const SandboxView: React.FC = () => {
       };
       const res = await axiosInstance.post('/sandbox/analyze', payload);
       if (res.data.success) setResult(res.data.data);
+      if (res.data.success && res.data.data?.attributes && res.data.data?.functional_dependencies) {
+        saveSchemaToStore(
+          {
+            table_name: res.data.data.schema_name || tableName,
+            attributes: res.data.data.attributes ?? [],
+            dependencies: res.data.data.functional_dependencies ?? [],
+          },
+          res.data.data.schema_name || tableName,
+        );
+      }
       else toast.error(res.data.message || 'Error al analizar');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Error al analizar');
@@ -83,6 +112,26 @@ export const SandboxView: React.FC = () => {
     try {
       const res = await axiosInstance.post('/sandbox/parse-ddl', { sql });
       if (res.data.success) setResult(res.data.data);
+      if (res.data.success && res.data.data?.table_name && Array.isArray(res.data.data?.columns)) {
+        const attributes = res.data.data.columns
+          .map((column: any) => String(column.name ?? column.column_name ?? column.field ?? '').trim())
+          .filter(Boolean);
+        const dependencies = [
+          ...(res.data.data.functional_dependencies?.from_pk ?? []),
+          ...(res.data.data.functional_dependencies?.from_unique ?? []),
+        ].map((dep: any) => ({
+          determinant: Array.isArray(dep.determinant) ? dep.determinant.map((value: string) => String(value).trim()).filter(Boolean) : [],
+          dependent: Array.isArray(dep.dependent) ? dep.dependent.map((value: string) => String(value).trim()).filter(Boolean) : [],
+        }));
+        saveSchemaToStore(
+          {
+            table_name: res.data.data.table_name,
+            attributes,
+            dependencies,
+          },
+          res.data.data.table_name,
+        );
+      }
       else toast.error(res.data.message || 'Error al analizar DDL');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Error al analizar DDL');
@@ -97,6 +146,25 @@ export const SandboxView: React.FC = () => {
     try {
       const res = await axiosInstance.post('/sandbox/import-csv', { csv });
       if (res.data.success) setResult(res.data.data);
+      if (res.data.success && res.data.data?.table_name && Array.isArray(res.data.data?.columns)) {
+        const attributes = res.data.data.columns
+          .map((column: any) => String(column.name ?? column.column_name ?? column.field ?? '').trim())
+          .filter(Boolean);
+        const dependencies = Array.isArray(res.data.data.discovered_fds)
+          ? res.data.data.discovered_fds.map((dep: any) => ({
+              determinant: Array.isArray(dep.determinant) ? dep.determinant.map((value: string) => String(value).trim()).filter(Boolean) : [],
+              dependent: Array.isArray(dep.dependent) ? dep.dependent.map((value: string) => String(value).trim()).filter(Boolean) : [],
+            }))
+          : [];
+        saveSchemaToStore(
+          {
+            table_name: res.data.data.table_name,
+            attributes,
+            dependencies,
+          },
+          res.data.data.table_name,
+        );
+      }
       else toast.error(res.data.message || 'Error al importar CSV');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Error al importar CSV');
@@ -113,6 +181,9 @@ export const SandboxView: React.FC = () => {
         params: { nf: exerciseNf },
       });
       if (res.data.success) setResult(res.data.data);
+      if (res.data.success && res.data.data?.schema) {
+        saveSchemaToStore(res.data.data.schema as RelationSchema, res.data.data.schema.table_name);
+      }
       else toast.error(res.data.message || 'Error al obtener ejercicio');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Error al obtener ejercicio');
@@ -154,6 +225,23 @@ export const SandboxView: React.FC = () => {
           </button>
         ))}
       </div>
+
+      {result && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-500/20 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-2.5 w-2.5 rounded-full bg-indigo-500" />
+            <span>El esquema ya quedó listo para enviarse al normalizador.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate?.('normalization')}
+            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500"
+          >
+            Abrir normalizador
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {mode === 'manual' && (
         <div className="space-y-4 bg-slate-800/50 rounded-xl p-6 border border-slate-700/50">

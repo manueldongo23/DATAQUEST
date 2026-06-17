@@ -11,14 +11,17 @@ class Esquema extends Model
     protected $fillable = [
         'user_id',
         'nombre',
+        'descripcion',
         'estructura_json',
         'dependencias_json',
+        'archived_at',
     ];
 
     protected $casts = [
         'estructura_json' => 'array',
         'dependencias_json' => 'array',
         'fecha_creacion' => 'datetime',
+        'archived_at' => 'datetime',
     ];
 
     public const CREATED_AT = 'fecha_creacion';

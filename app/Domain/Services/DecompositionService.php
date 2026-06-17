@@ -8,16 +8,18 @@ use App\Domain\Entities\FunctionalDependency;
 class DecompositionService
 {
     private NormalizationEngine $engine;
+    private SqlGenerationService $sqlService;
 
-    public function __construct(NormalizationEngine $engine)
+    public function __construct(NormalizationEngine $engine, ?SqlGenerationService $sqlService = null)
     {
         $this->engine = $engine;
+        $this->sqlService = $sqlService ?? new SqlGenerationService();
     }
 
     /**
      * Descomposición completa hasta 3FN/BCNF
      */
-    public function decomposeTo3NF(RelationSchema $schema): array
+    public function decomposeTo3NF(RelationSchema $schema, string $engine = 'postgresql'): array
     {
         $result = $this->engine->diagnoseNormalization($schema);
         $tables = [];
@@ -117,15 +119,16 @@ class DecompositionService
             'original_attributes' => $schema->getAttributesSet(),
             'current_nf' => $result['current_nf'],
             'violations' => $result['violations'],
+            'sql_engine' => $engine,
             'steps' => $steps,
             'resulting_tables' => $tables,
             'foreign_keys' => $foreignKeys,
             'candidate_keys' => $ck,
-            'sql' => $this->generateSQL($tables, $foreignKeys)
+            'sql' => $this->generateSQL($tables, $foreignKeys, $engine)
         ];
     }
 
-    public function decomposeToBCNF(RelationSchema $schema): array
+    public function decomposeToBCNF(RelationSchema $schema, string $engine = 'postgresql'): array
     {
         $decomposition = $this->engine->decomposeToBCNF($schema);
         $isLossless = $this->engine->isLosslessJoin($schema, $decomposition);
@@ -189,12 +192,13 @@ class DecompositionService
         return [
             'original_table' => $schema->name,
             'original_attributes' => $schema->getAttributesSet(),
+            'sql_engine' => $engine,
             'steps' => $steps,
             'resulting_tables' => $tables,
             'foreign_keys' => $foreignKeys,
             'is_lossless' => $isLossless,
             'dependency_preservation' => $preservation,
-            'sql' => $this->generateSQL($tables, $foreignKeys)
+            'sql' => $this->generateSQL($tables, $foreignKeys, $engine)
         ];
     }
 
@@ -208,29 +212,7 @@ class DecompositionService
         $sql .= "-- Motor: " . strtoupper($engine) . "\n";
         $sql .= "-- ============================================\n\n";
 
-        foreach ($tables as $table) {
-            $sql .= "CREATE TABLE " . $table['name'] . " (\n";
-            $cols = [];
-
-            foreach ($table['attributes'] as $attr) {
-                $isPk = in_array($attr, $table['primary_key'] ?? []);
-                if ($isPk && count($table['primary_key']) === 1) {
-                    $cols[] = "    " . $attr . " BIGINT PRIMARY KEY";
-                } elseif ($isPk) {
-                    $cols[] = "    " . $attr . " BIGINT NOT NULL";
-                } else {
-                    $cols[] = "    " . $attr . " TEXT";
-                }
-            }
-
-            if (count($table['primary_key'] ?? []) > 1) {
-                $pkCols = implode(', ', $table['primary_key']);
-                $cols[] = "    PRIMARY KEY (" . $pkCols . ")";
-            }
-
-            $sql .= implode(",\n", $cols);
-            $sql .= "\n);\n\n";
-        }
+        $sql .= $this->sqlService->generateDecomposedTables($tables, $engine);
 
         foreach ($foreignKeys as $fk) {
             $sql .= "ALTER TABLE " . $fk['from_table'] . "\n";

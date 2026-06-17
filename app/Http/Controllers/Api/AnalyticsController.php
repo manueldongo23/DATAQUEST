@@ -22,16 +22,25 @@ class AnalyticsController extends Controller
             return response()->json(['success' => false, 'message' => 'Usuario no encontrado'], 404);
         }
 
+        $limit = max(20, min(100, (int) request()->query('limit', 100)));
+
         $schemas = Esquema::where('user_id', $userId)
-            ->with('validaciones')
+            ->with(['validaciones' => function ($query) {
+                $query->orderBy('fecha');
+            }])
             ->orderBy('fecha_creacion', 'desc')
-            ->take(20)
+            ->take($limit)
             ->get()
             ->map(function ($esquema) {
+                $latestValidation = $esquema->validaciones->last();
+
                 return [
                     'id' => $esquema->id,
                     'nombre' => $esquema->nombre,
+                    'descripcion' => $esquema->descripcion,
                     'fecha' => $esquema->fecha_creacion,
+                    'archived_at' => $esquema->archived_at,
+                    'last_activity_at' => $latestValidation?->fecha ?? $esquema->fecha_creacion,
                     'validaciones' => $esquema->validaciones->map(function ($v) {
                         return [
                             'nivel' => $v->nivel_normalizacion,
